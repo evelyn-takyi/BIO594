@@ -1,0 +1,270 @@
+---
+title: "S.aurita analysis"
+output: 
+  pdf_document: default 
+  github_document: default
+---
+### Packages utilised
+```{r }
+library(vcfR)
+library(treemap)
+library(readr)
+require(devtools)
+library(gstudio)
+library(readr)
+library(ggplot2)
+library(reshape2)
+library(pegas)
+library(ape)  
+library(ade4)
+library(adegenet)
+library(diveRsity)
+library(doParallel)
+library(foreach)
+library(hierfstat)
+library(iterators)
+library(poppr)
+library(readxl)
+library(readr)
+library("magrittr")
+library(devtools)
+library(gstudio)
+library("mmod")
+library(readr)
+library(pegas)
+library(ape)  
+library(ade4)
+library(diveRsity)
+library(doParallel)
+library(foreach)
+library(genetics)
+library(hierfstat)
+library(iterators)
+library(poppr)
+library(readxl)
+library(adegenet)
+library(cowplot)
+library(pegas)
+library(StAMPP)
+library(lattice)
+library(ggplot2)
+library(ape)
+library(ggmap)
+library(dplyr)
+library(maps)
+library("devtools")
+library(LEA)
+
+```
+### Import data into R
+```{r }
+my_vcf <- read.vcfR("~/Desktop/aurita/SNPAUdp.neutralonly.recode.vcf")
+```
+### convert dataset into genind objects
+```{r }
+genind <- vcfR2genind(my_vcf)
+strata<- read.table("~/Desktop/S_A.strata.txt", header=TRUE)
+strata_df <- data.frame(strata)
+strata(genind) <- strata_df
+setPop(genind) <- ~Population
+genind@strata
+genind@pop
+```
+### Compute global FST and FIS value
+```{r}
+fstat(genind)
+wc(genind)
+
+```
+              pop        Ind
+Total 0.001272541 -0.4382084
+pop   0.000000000 -0.4400409
+$FST
+[1] 0.001272541
+
+$FIS
+[1] -0.4400409
+
+### Calculating pairwise FST values for the population
+
+```{r}
+Fst <- pairwise.fst(genind)
+Fst
+p.adjust(Fst, method = p.adjust.methods, n = length(Fst))
+
+```
+           1          2          3          4
+2 0.01486407                                 
+3 0.01325624 0.01135955                      
+4 0.01623653 0.01409414 0.01298511           
+5 0.01867921 0.01484906 0.01360483 0.01578667
+
+### calculate genetic distance using Wei& Cockerham
+```{r}
+GD <- genet.dist(genind, method = "WC84")
+GD
+```
+                   Benin         Ghana    Mauritania       Senegal
+Ghana      -0.0009339453                                          
+Mauritania  0.0009486159 -0.0001840155                            
+Senegal     0.0006043649  0.0001643840  0.0024840580              
+Togo        0.0055976601 -0.0001632681  0.0030778142  0.0015517736
+
+### Representation of pairwise FST values in heatmap format
+```{r}
+gindF.fst.mat <- pairwise.fst(genind, pop = strata(genind)$Population,res.type = "matrix")
+gindF.fst.mat
+reg_names = c("Benin","Ghana","Mauritania","Senegal","Togo")
+colnames(gindF.fst.mat)<- reg_names
+rownames(gindF.fst.mat)<- reg_names
+
+gindF.fst.mat.tri <- gindF.fst.mat
+gindF.fst.mat.tri[lower.tri(gindF.fst.mat, diag=TRUE)] <- NA
+melted <- melt(gindF.fst.mat, na.rm =TRUE)
+par(mfrow=c(2,1))
+ggplot(data = melted, aes(Var2, Var1, fill = value))+ geom_tile(color = "white")+
+  scale_fill_gradient(low = "white", high = "red", name="FST")  +
+  ggtitle(expression(atop("Pairwise FST, WC (1984)", atop(italic("N = 137, L = 9,170"), ""))))+
+  labs( x = "Sampling Site", y = "Sampling Site") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),axis.text.y = element_text(size = 13)) +
+  coord_fixed()
+
+```
+![Pairwise FST](https://github.com/evelyn-takyi/BIO594/blob/master/Screenshot%202018-05-21%2014.35.22.png)
+
+
+### compute the G-statistic Monte Carlo procedure tests for population structuring within the population and between the population
+```{r}
+gstat.randtest(genind,pop=NULL, method=c("global","within","between"),
+sup.pop=NULL, sub.pop=NULL, nsim=1000)
+```
+
+### converting data to a genlight object for analysis of PCA
+```{r}
+aa.genlightA <- vcfR2genlight(my_vcf, n.cores=1)
+locNames(aa.genlightA) <- paste(my_vcf@fix[,1],my_vcf@fix[,2],sep="_")
+pop(aa.genlightA)<-substr(indNames(aa.genlightA),1,3)
+```
+### Principal Component Analysis (PCA) to determine the genetic relatedness of each sample population
+```{r}
+PCA1 <- glPca(aa.genlightA, nf = 13)
+barplot(PCA1$eig, col = heat.colors(50), main="PCA Eigenvalues")
+title(ylab="Proportion of variance explained")
+title(xlab="Eigenvalue")
+
+PCA1.scores <- as.data.frame(PCA1$scores)
+PCA1.scores$pop <- pop(aa.genlightA)
+
+set.seed(999)
+G <- ggplot(PCA1.scores, aes(x=PC1, y=PC2, colour=pop)) 
+G <- G + geom_point(size=2)
+G <- G + stat_ellipse(level = 0.95, size = 1)
+G
+```
+BA : Benin
+GA : Ghana
+MA : Mauritania
+SA : Senegal
+TA : Togo
+
+
+### Discriminant Analysis of Principal Components(DAPC) plot to determine different groupings in the population 
+```{r}
+dapca <- dapc(aa.genlightA, n.pca=13, n.da=2)
+scatter(dapca,scree.da=TRUE, bg="white", posi.pca="topright", legend=FALSE,
+txt.leg=paste("group", 1:2), col=c("red","blue", "green", "black", "violet"))
+```
+BA : Benin
+GA : Ghana
+MA : Mauritania
+SA : Senegal
+TA : Togo
+
+### structure-like plot indicating membership probability of each sample
+```{r}
+dapc.results <- as.data.frame(dapca$posterior)
+dapc.results$pop <- pop(genind)
+dapc.results$indNames <- rownames(dapc.results)
+
+dapc.results <- melt(dapc.results)
+colnames(dapc.results) <- c("Original_Pop","Sample","Assigned_Pop","Posterior_membership_probability")
+p <- ggplot(dapc.results, aes(x=Sample,y=Posterior_membership_probability, fill=Assigned_Pop))
+p <- p + geom_bar(stat='identity') 
+p <- p + facet_grid(~Original_Pop, scales = "free")
+p <- p + theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5))
+p
+```
+BA : Benin
+GA : Ghana
+MA : Mauritania
+SA : Senegal
+TA : Togo
+
+
+### Neighbour Joining Tree plotted with boostrap values
+```{r}
+strata <- read.table("~/Desktop/S_A.strata.txt", head=TRUE)
+strata_df <- data.frame(strata)
+strata(genind) <- strata_df
+setPop(genind) <- ~Population
+xy <- read.table("~/Desktop/AMresults/S_aurita.dismatrix.txt")
+genind@other$xy <- xy
+toto <- genind2genpop(genind)
+Genetic.distance <- dist.genpop(toto, method=2)
+Geographic.distance <- dist(genind$other$xy)
+tree <- nj(Genetic.distance)
+plot.phylo(tree)
+```
+
+### Relationship between geographic distance and  genetic distance plot
+```{r}
+ibd <- mantel.randtest(Genetic.distance,Geographic.distance)
+plot(ibd)
+plot(Geographic.distance,Genetic.distance)
+abline(lm(Genetic.distance~Geographic.distance), col="red", lty=2)
+```
+### Representation of the structure plot in a pie chart
+```{r}
+# calculate mean per population
+grouped_data <- group_by(dapc.results, Original_Pop, Assigned_Pop)
+data_means <- summarise(grouped_data, mean=mean(Posterior_membership_probability))
+
+write.csv(data_means, "means.csv" )
+
+ # plot means for each original pop colored by assigned pop
+pie <- ggplot(data_means, aes(x=Original_Pop,y=mean, fill=Assigned_Pop))
+pie <- pie + geom_bar(stat='identity') + coord_polar("y",start=0)
+pie <- pie + facet_grid(~Original_Pop, scales = "free") + theme(axis.text=element_blank(), axis.ticks=element_blank(), panel.grid = element_blank(), strip.background = element_blank())
+pie
+```
+BA : Benin
+GA : Ghana
+MA : Mauritania
+SA : Senegal
+TA : Togo
+
+###AMOVA
+```{r}
+aa.genlight2 <- aa.genlightA
+pop(aa.genlight2)<-substr(indNames(aa.genlight2),5,9)
+aa.D.ind <- stamppNeisD(aa.genlight2, pop = FALSE)
+aa.D.pop2 <- stamppNeisD(aa.genlight2, pop = TRUE)
+stamppPhylip(aa.D.pop2, file="aa.pops2_Neis_distance.phy.dst")
+# create the dist objects used in analyses below
+colnames(aa.D.ind) <- rownames(aa.D.ind)
+aa.D.ind.dist<-as.dist(aa.D.ind, diag=T)
+attr(aa.D.ind.dist, "Labels")<-rownames(aa.D.ind)
+colnames(aa.D.pop2) <- rownames(aa.D.pop2)
+aa.D.pop.dist<-as.dist(aa.D.pop2, diag=T)
+attr(aa.D.pop.dist, "Labels")<-rownames(aa.D.pop2)
+pops <- as.factor(pop(aa.genlight2))
+groups <- as.factor(substr(indNames(aa.genlight2),1,3))
+# hierarchical AMOVA
+(res <- pegas::amova(aa.D.ind.dist ~ groups/pops))
+
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
